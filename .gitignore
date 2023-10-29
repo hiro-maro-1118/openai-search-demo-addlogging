@@ -1,0 +1,9 @@
+.venv/
+.azure/
+__pycache__/
+frontend/node_modules/
+backend/.azure/
+backend/__pycache__/
+data/
+
+
