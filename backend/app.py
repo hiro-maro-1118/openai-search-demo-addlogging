@@ -1,10 +1,9 @@
 import io
-import logging
 import mimetypes
 import os
 import time
 import json
-from logging import config
+from logging import getLogger,config
 
 import openai
 from azure.identity.aio import DefaultAzureCredential
@@ -30,14 +29,11 @@ from approaches.retrievethenread import RetrieveThenReadApproach
 from approaches.chatlogging import get_user_name, write_error
 # ------------------------------------end-------------------------------------
 
-
-logger = logging.getLogger(__name__)
+logger = getLogger(__name__)
 with open('log_config.json', 'r') as f:
     log_conf = json.load(f)
 
 config.dictConfig(log_conf)
-
-
 
 # Replace these with your own values, either in environment variables or directly here
 AZURE_STORAGE_ACCOUNT = os.getenv("AZURE_STORAGE_ACCOUNT", "mystorageaccount")
