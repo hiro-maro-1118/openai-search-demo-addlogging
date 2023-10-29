@@ -30,7 +30,6 @@ class ApproachType(Enum):
 
 def get_user_name(req: request):
     user_name = ""
-
     try:
         token = req.headers["X-MS-TOKEN-AAD-ID-TOKEN"]
         claim = jwt.decode(jwt=token, options={"verify_signature": False})
