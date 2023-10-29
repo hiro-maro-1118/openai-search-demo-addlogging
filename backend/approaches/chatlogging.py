@@ -13,9 +13,7 @@ from azure.cosmos import CosmosClient
 from azure.identity import DefaultAzureCredential
 
 # CosmosDB
-# endpoint = os.environ.get(f"https://{AZURE_COSMOSDB_ENDPOINT}.documents.azure.com:443/")
 endpoint = os.environ.get("AZURE_COSMOSDB_ENDPOINT")
-# key = os.environ.get("COSMOSDB_KEY")
 database_name = os.environ.get("AZURE_COSMOSDB_DATABASE")
 container_name = os.environ.get("AZURE_COSMOSDB_CONTAINER")
 # CosmosDB Initialization
@@ -24,21 +22,15 @@ database = CosmosClient(endpoint, credential).get_database_client(database_name)
 container = database.get_container_client(container_name)
 
 logger = logging.getLogger('same_hierarchy')
-# logger.addHandler(AzureLogHandler(connection_string=os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING")))
-# console_handler = logging.StreamHandler()
-# console_handler.setLevel(logging.DEBUG)
-# logger.addHandler(console_handler)
-# logger.setLevel(logging.INFO)
 
 class ApproachType(Enum):
     Chat = "chat"
-    # DocSearch = "docsearch"
     Ask = "ask"
     Other="other"
 
 def get_user_name(req: request):
     user_name = ""
-
+    logger.info(endpoint)
     try:
         token = req.headers["X-MS-TOKEN-AAD-ID-TOKEN"]
         claim = jwt.decode(jwt=token, options={"verify_signature": False})
@@ -60,12 +52,6 @@ def write_chatlog(approach: ApproachType, user_name: str, total_tokens: int, inp
 
     if query != "":
         properties["query"] = query
-    container.create_item(body=properties, enable_automatic_id_generation=True)
-    
-def write_anylog(any):
-    properties={
-        "any":any
-    }
     container.create_item(body=properties, enable_automatic_id_generation=True)
 
 def write_error(category: str, user_name: str, error: str):
