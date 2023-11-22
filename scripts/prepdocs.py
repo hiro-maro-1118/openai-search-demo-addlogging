@@ -6,6 +6,7 @@ import io
 import os
 import re
 import time
+import subprocess
 
 import openai
 from azure.ai.formrecognizer import DocumentAnalysisClient
@@ -38,6 +39,10 @@ SECTION_OVERLAP = 100
 def blob_name_from_file_page(filename, page = 0):
     if os.path.splitext(filename)[1].lower() == ".pdf":
         return os.path.splitext(os.path.basename(filename))[0] + f"-{page}" + ".pdf"
+    # --------------------------- txtファイルをチャンキングするロジック start ----------------------------------
+    elif os.path.splitext(filename)[1].lower() == ".txt":
+        return os.path.splitext(os.path.basename(filename))[0] + f"-{page}" + ".txt"
+    # -----------------------------------------------  end  ----------------------------------------------------
     else:
         return os.path.basename(filename)
 
@@ -97,6 +102,7 @@ def table_to_html(table):
 def get_document_text(filename):
     offset = 0
     page_map = []
+    print(os.path.basename(filename).split(".")[-1])
     if args.localpdfparser:
         reader = PdfReader(filename)
         pages = reader.pages
@@ -104,6 +110,19 @@ def get_document_text(filename):
             page_text = p.extract_text()
             page_map.append((page_num, offset, page_text))
             offset += len(page_text)
+    # --------------------------- txtファイルをチャンキングするロジック start -------------------------------
+    # --------------------------- TODO：分割元ファイルも対象になってしまう-----------------------------------
+    elif os.path.splitext(filename)[1].lower() == ".txt":
+        char_count = 0
+        text = ""
+        # filename:  ./data/XXXXX-{page_num}.txt となっているのでpage_num部分を抜き出す
+        page_num = os.path.splitext(filename)[0].split('-')[-1]
+        print(page_num)
+        with open(filename,'r',encoding='utf-8') as file:
+            text = file.read()
+            char_count = len(text)
+        page_map.append((page_num, char_count, text))
+    # -------------------------------------------- end ------------------------------------------------------
     else:
         if args.verbose: print(f"Extracting text from '{filename}' using Azure Form Recognizer")
         form_recognizer_client = DocumentAnalysisClient(endpoint=f"https://{args.formrecognizerservice}.cognitiveservices.azure.com/", credential=formrecognizer_creds, headers={"x-ms-useragent": "azure-search-chat-demo/1.0.0"})
@@ -301,6 +320,48 @@ def remove_from_index(filename):
         # It can take a few seconds for search results to reflect changes, so wait a bit
         time.sleep(2)
 
+# --------------------- WORDファイルとPowerpointファイルをPDFに変換するロジック start ---------------------
+# --------------------- TODO:windows用ロジックの実装 ------------------------------------------------------
+def convert_pptx_to_pdf(input_pptx, output_pdf):
+    try:
+        # LibreOfficeを使用してpptxファイルをPDFに変換
+        subprocess.run(['libreoffice', '--headless', '--convert-to', 'pdf', '--outdir', output_pdf, input_pptx])
+        print(f"{input_pptx} を {output_pdf} に変換しました。")
+    except Exception as e:
+        print(f"変換中にエラーが発生しました: {str(e)}")
+
+def convert_docx_to_pdf(input_docx, output_pdf):
+    try:
+        # LibreOfficeを使用してdocxファイルをPDFに変換
+        subprocess.run(['libreoffice', '--headless', '--convert-to', 'pdf', '--outdir', output_pdf, input_docx])
+        print(f"{input_docx} を {output_pdf} に変換しました。")
+    except Exception as e:
+        print(f"変換中にエラーが発生しました: {str(e)}")
+# -------------------------------------------- end ------------------------------------------------------
+
+# --------------------------- txtファイルをチャンキングするロジック start -------------------------------
+# --------------------- TODO：overlapする場合の実装 ------------------------------------------------------
+def split_text_file_by_page(input_file):
+    # ページごとに分割して保存する関数
+    base_filename = os.path.basename(input_file).split('.')[0]
+    # テキストファイルを読み込みます
+    with open(input_file, 'r', encoding='utf-8') as file:
+        lines = file.readlines()
+
+    # ページごとに分割して保存します
+    page_number = 1
+    lines_per_page = 20 if args.linerperpage is None else args.linerperpage  # 1ページあたりの行数
+
+    for i in range(0, len(lines), lines_per_page):
+        page_lines = lines[i:i + lines_per_page]
+        output_file = f'./data/{base_filename}-{page_number}.txt'
+        
+        # ページを新しいファイルに書き込みます
+        with open(output_file, 'w', encoding='utf-8') as page_file:
+            page_file.writelines(page_lines)
+        
+        page_number += 1
+# -------------------------------------------- end ------------------------------------------------------
 
 if __name__ == "__main__":
 
@@ -327,11 +388,15 @@ if __name__ == "__main__":
     parser.add_argument("--localpdfparser", action="store_true", help="Use PyPdf local PDF parser (supports only digital PDFs) instead of Azure Form Recognizer service to extract text, tables and layout from the documents")
     parser.add_argument("--formrecognizerservice", required=False, help="Optional. Name of the Azure Form Recognizer service which will be used to extract text, tables and layout from the documents (must exist already)")
     parser.add_argument("--formrecognizerkey", required=False, help="Optional. Use this Azure Form Recognizer account key instead of the current user identity to login (use az login to set current user for Azure)")
+    # --------------------------- txtファイルをチャンキングするロジック start -------------------------------
+    parser.add_argument("--linerperpage", help="Number of lines per page")
+    # -------------------------------------------- end ------------------------------------------------------
     parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     args = parser.parse_args()
 
     # Use the current user identity to connect to Azure services unless a key is explicitly set for any of them
     azd_credential = AzureDeveloperCliCredential() if args.tenantid is None else AzureDeveloperCliCredential(tenant_id=args.tenantid, process_timeout=60)
+
     default_creds = azd_credential if args.searchkey is None or args.storagekey is None else None
     search_creds = default_creds if args.searchkey is None else AzureKeyCredential(args.searchkey)
     use_vectors = not args.novectors
@@ -363,6 +428,20 @@ if __name__ == "__main__":
         if not args.remove:
             create_search_index()
 
+# --------------------- WORDファイルとPowerpointファイルをPDFに変換するロジック start ---------------------
+        print("docx file and pptx file convert to pdf...")
+        for filename in glob.glob(args.files):
+            if os.path.splitext(filename)[1].lower() == ".docx":                
+                # 例: docxファイルをPDFに変換
+                convert_docx_to_pdf(filename, "data")
+            elif os.path.splitext(filename)[1].lower() == ".pptx":
+                # 例: pptxファイルをPDFに変換
+                convert_pptx_to_pdf(filename, "data")
+# -------------------------------------------- end ---------------------------------------------------------
+# --------------------------- txtファイルをチャンキングするロジック start ----------------------------------
+            elif os.path.splitext(filename)[1].lower() == ".txt":
+                split_text_file_by_page(filename)
+# -------------------------------------------- end ---------------------------------------------------------
         print("Processing files...")
         for filename in glob.glob(args.files):
             if args.verbose: print(f"Processing '{filename}'")
@@ -372,6 +451,10 @@ if __name__ == "__main__":
             elif args.removeall:
                 remove_blobs(None)
                 remove_from_index(None)
+            # --------------------- WORDファイルとPowerpointファイルをPDFに変換するロジック start ---------------------
+            elif os.path.splitext(filename)[1].lower() in [".docx",".pptx"]:
+                pass
+            # -------------------------------------------- end ------------------------------------------------------
             else:
                 if not args.skipblobs:
                     upload_blobs(filename)
